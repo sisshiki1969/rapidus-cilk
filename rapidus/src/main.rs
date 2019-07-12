@@ -52,10 +52,8 @@ pub fn main() {
     vec![],
   ));
   func_queue.push((main, vec![], node));
-  let mut func_id_table: Vec<FunctionId> = vec![];
 
   while let Some((function_id, params, node)) = func_queue.pop() {
-    func_id_table.push(function_id);
     let fc = FuncCompiler::new(&mut module, function_id);
     let func_map = fc.compile(&params, &node);
     for func in &func_map {
@@ -85,6 +83,7 @@ pub fn main() {
 #[derive(Debug)]
 pub struct FuncCompiler<'a> {
   function_id: FunctionId,
+  function_name: String,
   builder: Builder<'a>,
   variable_map: HashMap<String, Value>,
   arguments_map: HashMap<String, usize>,
@@ -93,9 +92,11 @@ pub struct FuncCompiler<'a> {
 
 impl<'a> FuncCompiler<'a> {
   pub fn new(module: &'a mut module::Module, function_id: FunctionId) -> Self {
+    let function_name = module.function_ref(function_id).name.clone();
     let builder = Builder::new(module, function_id);
     FuncCompiler {
       function_id,
+      function_name,
       builder,
       variable_map: HashMap::default(),
       arguments_map: HashMap::default(),
@@ -148,6 +149,7 @@ impl<'a> FuncCompiler<'a> {
         if self.function_map.contains_key(name) {
           panic!("duplicated declaration of function: named {:?}", name);
         } else {
+          // TODO: name mangling
           let func_id = self.builder.module.add_function(function::Function::new(
             name.as_str(),
             types::Type::Int32,
@@ -254,13 +256,13 @@ impl<'a> FuncCompiler<'a> {
       NodeBase::Call(callee, args) => {
         let callee_id = match &callee.base {
           NodeBase::Identifier(name) => {
-            for e in &self.function_map {
-              println!("name: {} id: {:?}", e.0, (e.1).0);
-            }
-            println!("ident: {}", name);
-            match self..get(name) {
+            if *name == self.function_name {
+              self.function_id
+            } else {
+            match self.function_map.get(name) {
               Some(v) => v.0,
               None => panic!("function not found: {}", name)
+            }
             }
           }
           _ => unimplemented!("callee should be Identifier(str)"),
@@ -302,57 +304,3 @@ impl<'a> FuncCompiler<'a> {
     }
   }
 }
-/*
-  // fibonacci
-  let entry = builder.append_basic_block();
-  let br1 = builder.append_basic_block();
-  let br2 = builder.append_basic_block();
-  builder.set_insert_point(entry);
-  let arg0 = builder.get_param(0).unwrap();
-  let eq1 = builder.build_icmp(
-    opcode::ICmpKind::Le,
-    arg0,
-    value::Value::Immediate(value::ImmediateValue::Int32(2)),
-  );
-  builder.build_cond_br(eq1, br1, br2);
-  builder.set_insert_point(br1);
-  builder.build_ret(value::Value::Immediate(value::ImmediateValue::Int32(1)));
-  builder.set_insert_point(br2);
-  let fibo1arg = builder.build_sub(
-    arg0,
-    value::Value::Immediate(value::ImmediateValue::Int32(1)),
-  );
-  let fibo1 = builder.build_call(value::Value::Function(fibo), vec![fibo1arg]);
-  let fibo2arg = builder.build_sub(
-    arg0,
-    value::Value::Immediate(value::ImmediateValue::Int32(2)),
-  );
-  let fibo2 = builder.build_call(value::Value::Function(fibo), vec![fibo2arg]);
-  let add = builder.build_add(fibo1, fibo2);
-  builder.build_ret(add);
-
-  let mut liveness = liveness::LivenessAnalyzer::new(&m);
-  liveness.analyze();
-
-  let f = m.function_ref(fibo);
-  println!("liveness: {}", f.to_string(&m));
-
-  let mut regalloc = regalloc::RegisterAllocator::new(&m);
-  regalloc.analyze();
-
-  let mut interp = interp::Interpreter::new(&m);
-  let ret = interp.run_function(fibo, vec![interp::ConcreteValue::Int32(9)]);
-  println!("exec: fibo(9) = {:?}", ret);
-
-  let mut jit = compiler::JITCompiler::new(&m);
-  jit.compile(fibo);
-  println!(
-    "jit: fibo(9) = {:?}",
-    jit.run(fibo, vec![compiler::GenericValue::Int32(9)])
-  );
-  println!(
-    "jit: fibo(40) = {:?}",
-    jit.run(fibo, vec![compiler::GenericValue::Int32(40)])
-  );
-}
-*/
