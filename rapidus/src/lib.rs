@@ -6,6 +6,7 @@ pub mod node;
 pub mod parser;
 pub mod token;
 pub mod util;
+pub mod executer;
 
 extern crate ansi_term;
 extern crate chrono;

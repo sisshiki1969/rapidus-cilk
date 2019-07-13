@@ -10,5 +10,5 @@ function fibo(x) {
     return fibo(x) + fibo(y)
   }
 }
-
-return fibo(30)
+//main()
+return fibo(10)
