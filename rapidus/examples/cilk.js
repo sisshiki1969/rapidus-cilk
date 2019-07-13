@@ -8,4 +8,4 @@ function fibo(x) {
   }
 }
 
-return fibo(12)
+return fibo(30)

@@ -2420,7 +2420,7 @@ fn function_decl() {
             ),
         ),
         (
-            "function f(x, y, ..=z) { return x + y }",
+            "function f(x, y, ...z) { return x + y }",
             Node::new(
                 NodeBase::FunctionDecl(
                     "f".to_string(),
@@ -2516,7 +2516,7 @@ fn arrow_function() {
             ),
         ),
         (
-            "(a, b, ..=c) => a",
+            "(a, b, ...c) => a",
             Node::new(
                 NodeBase::ArrowFunction(
                     vec![

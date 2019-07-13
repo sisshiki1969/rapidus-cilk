@@ -3,7 +3,7 @@ use cilk::ir::builder::Builder;
 use cilk::ir::function::FunctionId;
 use cilk::module::Module;
 use cilk::{
-  exec::{interpreter::interp, jit::x64::compiler, jit::x64::liveness, jit::x64::regalloc},
+  exec::{interpreter::interp, jit::x64::compiler, jit::x64::regalloc},
   ir::{function, module, types, value::*, opcode::ICmpKind},
 };
 use rapidus::node::{BinOp, FormalParameter, Node, NodeBase};
@@ -69,7 +69,6 @@ pub fn main() {
   let ret = interp.run_function(main, vec![interp::ConcreteValue::Int32(9)]);
   println!("exec: {:?}", ret);
 
-  liveness::LivenessAnalyzer::new(&module).analyze();
   regalloc::RegisterAllocator::new(&module).analyze();
 
   let mut jit = compiler::JITCompiler::new(&module);
@@ -149,15 +148,15 @@ impl<'a> FuncCompiler<'a> {
         if self.function_map.contains_key(name) {
           panic!("duplicated declaration of function: named {:?}", name);
         } else {
-          // TODO: name mangling
+          let decl_function_name = format!("{}.{}", self.function_name, name);
           let func_id = self.builder.module.add_function(function::Function::new(
-            name.as_str(),
+            decl_function_name.as_str(),
             types::Type::Int32,
             vec![types::Type::Int32; params.len()],
           ));
           self
             .function_map
-            .insert(name.clone(), (func_id, params.clone(), *body.clone()));
+            .insert(decl_function_name.clone(), (func_id, params.clone(), *body.clone()));
         }
       }
       _ => {}
@@ -256,13 +255,17 @@ impl<'a> FuncCompiler<'a> {
       NodeBase::Call(callee, args) => {
         let callee_id = match &callee.base {
           NodeBase::Identifier(name) => {
-            if *name == self.function_name {
+            if *name == self.function_name.split('.').last().unwrap() {
               self.function_id
             } else {
-            match self.function_map.get(name) {
-              Some(v) => v.0,
-              None => panic!("function not found: {}", name)
-            }
+              let name = format!("{}.{}", self.function_name, *name);
+              match self.function_map.get(&name) {
+                Some(v) => v.0,
+                None => {
+                  println!("{:?}", self.function_map);
+                  panic!("function not found: {}", name);
+                }
+              }
             }
           }
           _ => unimplemented!("callee should be Identifier(str)"),
