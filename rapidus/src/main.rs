@@ -156,7 +156,7 @@ impl<'a> FuncCompiler<'a> {
           ));
           self
             .function_map
-            .insert(decl_function_name.clone(), (func_id, params.clone(), *body.clone()));
+            .insert(name.clone(), (func_id, params.clone(), *body.clone()));
         }
       }
       _ => {}
@@ -288,8 +288,7 @@ impl<'a> FuncCompiler<'a> {
   }
 
   fn find_func_name(&mut self, name: &String) -> FunctionId {
-    let full_name = format!("{}.{}", self.function_name, *name);
-    match self.function_map.get(&full_name) {
+    match self.function_map.get(name) {
       Some(v) => return v.0,
       None => {}
     };
