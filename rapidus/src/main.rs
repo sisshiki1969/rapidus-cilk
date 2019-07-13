@@ -254,21 +254,8 @@ impl<'a> FuncCompiler<'a> {
       NodeBase::FunctionDecl(_name, _params, _body) => Value::None,
       NodeBase::Call(callee, args) => {
         let callee_id = match &callee.base {
-          NodeBase::Identifier(name) => {
-            if *name == self.function_name.split('.').last().unwrap() {
-              self.function_id
-            } else {
-              let name = format!("{}.{}", self.function_name, *name);
-              match self.function_map.get(&name) {
-                Some(v) => v.0,
-                None => {
-                  println!("{:?}", self.function_map);
-                  panic!("function not found: {}", name);
-                }
-              }
-            }
-          }
-          _ => unimplemented!("callee should be Identifier(str)"),
+          NodeBase::Identifier(name) => self.find_func_name(name),
+          _ => unimplemented!("callee should be Identifier."),
         };
         let mut args_v = vec![];
         for arg in args {
@@ -298,6 +285,24 @@ impl<'a> FuncCompiler<'a> {
       }
       _ => unimplemented!("{:?}", node.base),
     }
+  }
+
+  fn find_func_name(&mut self, name: &String) -> FunctionId {
+    let full_name = format!("{}.{}", self.function_name, *name);
+    match self.function_map.get(&full_name) {
+      Some(v) => return v.0,
+      None => {}
+    };
+    let function_name = self.function_name.clone();
+    let mut func_name_vec: Vec<&str> = function_name.split('.').collect();
+    while let Some(fname) = func_name_vec.pop() {
+      if *name == *fname {
+        let fullname = format!("{}.{}", func_name_vec.join("."), fname);
+        return self.builder.module.find_function_by_name(fullname.as_str()).unwrap();
+      }
+    }
+    println!("{:?}", self.function_map);
+    panic!("function not found: {}", name);
   }
 
   fn get_variable(&mut self, name: &String) -> Value {

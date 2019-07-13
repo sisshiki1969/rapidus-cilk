@@ -4,7 +4,10 @@ function fibo(x) {
   } else if (x == 2) {
     return 1
   } else {
-    return fibo(x - 1) + fibo(x - 2)
+    return fibo_sub(x - 1, x - 2)
+  }
+  function fibo_sub(x, y) {
+    return fibo(x) + fibo(y)
   }
 }
 
