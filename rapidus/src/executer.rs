@@ -29,6 +29,11 @@ pub fn compile_and_run_file(file_name: impl Into<String>) -> Result<compiler::Ge
   //println!("{:?}", node);
 
   let mut module = module::Module::new("cilk");
+  module.add_function(function::Function::new(
+    "cilk.println.i32",
+    types::Type::Void,
+    vec![types::Type::Int32],
+  ));
   let mut func_queue: Vec<(FunctionId, Vec<FormalParameter>, Node)> = vec![];
   let main = module.add_function(function::Function::new(
     "main",
@@ -47,6 +52,7 @@ pub fn compile_and_run_file(file_name: impl Into<String>) -> Result<compiler::Ge
 
   for (f_id, func) in &module.functions {
     println!("{:?} {}", f_id, func.to_string(&module));
+    //println!("{:?}", func);
   }
 
   let mut interp = interp::Interpreter::new(&module);
@@ -191,6 +197,11 @@ impl<'a> FuncCompiler<'a> {
           let rhs_v = self.visit(rhs);
           self.builder.build_icmp(ICmpKind::Eq, lhs_v, rhs_v)
         }
+        BinOp::Le => {
+          let lhs_v = self.visit(lhs);
+          let rhs_v = self.visit(rhs);
+          self.builder.build_icmp(ICmpKind::Le, lhs_v, rhs_v)
+        }
         _ => unimplemented!("{:?}", op),
       },
       NodeBase::Assign(lhs, rhs) => match &lhs.base {
@@ -204,7 +215,7 @@ impl<'a> FuncCompiler<'a> {
           "Left hand side of assignment statement should be an identifier. {:?}",
           lhs
         ),
-      },
+      }
       NodeBase::If(cond, then_, else_) => {
         let cond_v = self.visit(cond);
         let then_bb = self.builder.append_basic_block();
@@ -218,15 +229,22 @@ impl<'a> FuncCompiler<'a> {
         self.visit(else_);
         self.builder.build_br(cont_bb);
         self.builder.set_insert_point(cont_bb);
-        /*
-        let ret = builder.build_phi(vec![
-        (
-            value::Value::Immediate(value::ImmediateValue::Int32(1)),
-            then_bb,
-        ),
-        (val3, else_bb),
-    ]);
-    */
+
+        Value::None
+      }
+      NodeBase::While(cond, body) => {
+        let cond_bb = self.builder.append_basic_block();
+        let body_bb = self.builder.append_basic_block();
+        let cont_bb = self.builder.append_basic_block();
+        self.builder.build_br(cond_bb);
+        self.builder.set_insert_point(cond_bb);
+        let cond_v = self.visit(cond);
+        self.builder.build_cond_br(cond_v, body_bb, cont_bb);
+        self.builder.set_insert_point(body_bb);
+        self.visit(body);
+        self.builder.build_br(cond_bb);
+        self.builder.set_insert_point(cont_bb);
+
         Value::None
       }
       NodeBase::VarDecl(name, init, _kind) => {
@@ -241,6 +259,13 @@ impl<'a> FuncCompiler<'a> {
       NodeBase::Call(callee, args) => {
         let callee_id = match &callee.base {
           NodeBase::Identifier(name) => self.find_func_name(name),
+          NodeBase::Member(parent, member) => {
+            if parent.base == NodeBase::Identifier("console".to_string()) && *member == "log".to_string() {
+              self.builder.module.find_function_by_name("cilk.println.i32").unwrap()
+            } else {
+              panic!("Member expression is not implemented yet.");
+            }
+          }
           _ => unimplemented!("callee should be Identifier."),
         };
         let mut args_v = vec![];

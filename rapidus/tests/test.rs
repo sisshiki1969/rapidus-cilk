@@ -13,3 +13,14 @@ fn test_file(file_name: &str, expected: i32) {
 fn rapidus_fibo() {
   test_file("fibo.js", 55);
 }
+
+#[test]
+fn rapidus_while() {
+  test_file("while.js", 9);
+}
+/*
+#[test]
+fn rapidus_prime() {
+  test_file("prime.js", 9);
+}
+*/
