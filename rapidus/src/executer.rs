@@ -1,19 +1,22 @@
-use cilk::ir::builder::Builder;
-use cilk::ir::function::FunctionId;
-use cilk::module::Module;
-use cilk::{
-  exec::{interpreter::interp, jit::x64::compiler, jit::x64::regalloc},
-  ir::{function, module, types, value::*, opcode::ICmpKind},
-};
-pub use cilk::exec::jit::x64::compiler::GenericValue;
 use crate::node::{BinOp, FormalParameter, Node, NodeBase};
 use crate::parser;
+pub use cilk::exec::jit::x64::compiler::GenericValue;
+use cilk::ir::builder::Builder;
+pub use cilk::ir::function::FunctionId;
+pub use cilk::module::Module;
+pub use cilk::{
+  exec::{
+    interpreter::interp::{ConcreteValue, Interpreter},
+    jit::x64::compiler::JITCompiler,
+    jit::x64::regalloc::RegisterAllocator,
+  },
+  ir::{function, module, opcode::ICmpKind, types, value::*},
+};
 use std::collections::HashMap;
 extern crate clap;
 extern crate libc;
 
-pub fn compile_and_run_file(file_name: impl Into<String>) -> Result<compiler::GenericValue, String> {
-
+pub fn compile_file(file_name: impl Into<String>) -> Result<Module, String> {
   let mut parser = match parser::Parser::load_module(file_name.into()) {
     Ok(ok) => ok,
     Err(err) => return Err(format!("{:?}", err)),
@@ -35,11 +38,7 @@ pub fn compile_and_run_file(file_name: impl Into<String>) -> Result<compiler::Ge
     vec![types::Type::Int32],
   ));
   let mut func_queue: Vec<(FunctionId, Vec<FormalParameter>, Node)> = vec![];
-  let main = module.add_function(function::Function::new(
-    "main",
-    types::Type::Int32,
-    vec![],
-  ));
+  let main = module.add_function(function::Function::new("main", types::Type::Int32, vec![]));
   func_queue.push((main, vec![], node));
 
   while let Some((function_id, params, node)) = func_queue.pop() {
@@ -50,26 +49,33 @@ pub fn compile_and_run_file(file_name: impl Into<String>) -> Result<compiler::Ge
     }
   }
 
-  for (f_id, func) in &module.functions {
-    println!("{:?} {}", f_id, func.to_string(&module));
-    //println!("{:?}", func);
-  }
+  #[cfg(debug_assertions)]
+  {
+    for (f_id, func) in &module.functions {
+      println!("{:?} {}", f_id, func.to_string(&module));
+    }
+  };
 
-  let mut interp = interp::Interpreter::new(&module);
-  let ret = interp.run_function(main, vec![interp::ConcreteValue::Int32(9)]);
-  println!("exec: {:?}", ret);
+  RegisterAllocator::new(&module).analyze();
+  Ok(module)
+}
 
-  regalloc::RegisterAllocator::new(&module).analyze();
-
-  let mut jit = compiler::JITCompiler::new(&module);
+pub fn execute_jit(module: &mut Module) -> Result<GenericValue, String> {
+  let main = module.find_function_by_name("main").unwrap();
+  let mut jit = JITCompiler::new(&module);
   jit.compile_module();
 
   let ret = jit.run(main, vec![]);
-  println!("jit: {:?}", ret);
 
   Ok(ret)
 }
 
+pub fn execute_interpreter(module: &mut Module) -> Result<ConcreteValue, String> {
+  let main = module.find_function_by_name("main").unwrap();
+  let mut interp = Interpreter::new(&module);
+  let ret = interp.run_function(main, vec![ConcreteValue::Int32(9)]);
+  Ok(ret)
+}
 
 #[derive(Debug)]
 pub struct FuncCompiler<'a> {
@@ -128,6 +134,11 @@ impl<'a> FuncCompiler<'a> {
           self.collect_var_decl(&node);
         }
       }
+      NodeBase::Block(nodes) => {
+        for node in nodes {
+          self.collect_var_decl(&node);
+        }
+      }
       NodeBase::VarDecl(name, _init, _kind) => {
         if self.variable_map.contains_key(name) {
           panic!("duplicated declaration of variable: named {:?}", name);
@@ -135,6 +146,18 @@ impl<'a> FuncCompiler<'a> {
           let v = self.builder.build_alloca(types::Type::Int32);
           self.variable_map.insert(name.clone(), v);
         }
+      }
+      NodeBase::If(_, then_, else_) => {
+        self.collect_var_decl(&then_);
+        self.collect_var_decl(&else_);
+      }
+      NodeBase::While(_, body) => {
+        self.collect_var_decl(&body);
+      }
+      NodeBase::For(init, _, step, body) => {
+        self.collect_var_decl(&init);
+        self.collect_var_decl(&step);
+        self.collect_var_decl(&body);
       }
       NodeBase::FunctionDecl(name, params, body) => {
         if self.function_map.contains_key(name) {
@@ -215,7 +238,7 @@ impl<'a> FuncCompiler<'a> {
           "Left hand side of assignment statement should be an identifier. {:?}",
           lhs
         ),
-      }
+      },
       NodeBase::If(cond, then_, else_) => {
         let cond_v = self.visit(cond);
         let then_bb = self.builder.append_basic_block();
@@ -247,6 +270,26 @@ impl<'a> FuncCompiler<'a> {
 
         Value::None
       }
+      NodeBase::For(init, cond, step, body) => {
+        let init_bb = self.builder.append_basic_block();
+        let cond_bb = self.builder.append_basic_block();
+        let body_bb = self.builder.append_basic_block();
+        let cont_bb = self.builder.append_basic_block();
+        self.builder.build_br(init_bb);
+        self.builder.set_insert_point(init_bb);
+        self.visit(init);
+        self.builder.build_br(cond_bb);
+        self.builder.set_insert_point(cond_bb);
+        let cond_v = self.visit(cond);
+        self.builder.build_cond_br(cond_v, body_bb, cont_bb);
+        self.builder.set_insert_point(body_bb);
+        self.visit(body);
+        self.visit(step);
+        self.builder.build_br(cond_bb);
+        self.builder.set_insert_point(cont_bb);
+
+        Value::None
+      }
       NodeBase::VarDecl(name, init, _kind) => {
         let init_v = match init {
           Some(init) => self.visit(init),
@@ -260,8 +303,14 @@ impl<'a> FuncCompiler<'a> {
         let callee_id = match &callee.base {
           NodeBase::Identifier(name) => self.find_func_name(name),
           NodeBase::Member(parent, member) => {
-            if parent.base == NodeBase::Identifier("console".to_string()) && *member == "log".to_string() {
-              self.builder.module.find_function_by_name("cilk.println.i32").unwrap()
+            if parent.base == NodeBase::Identifier("console".to_string())
+              && *member == "log".to_string()
+            {
+              self
+                .builder
+                .module
+                .find_function_by_name("cilk.println.i32")
+                .unwrap()
             } else {
               panic!("Member expression is not implemented yet.");
             }
@@ -294,6 +343,7 @@ impl<'a> FuncCompiler<'a> {
         let x_i32 = *x as i32;
         Value::Immediate(ImmediateValue::Int32(x_i32))
       }
+      NodeBase::Nope => Value::None,
       _ => unimplemented!("{:?}", node.base),
     }
   }
@@ -308,7 +358,11 @@ impl<'a> FuncCompiler<'a> {
     while let Some(fname) = func_name_vec.pop() {
       if *name == *fname {
         let fullname = format!("{}.{}", func_name_vec.join("."), fname);
-        return self.builder.module.find_function_by_name(fullname.as_str()).unwrap();
+        return self
+          .builder
+          .module
+          .find_function_by_name(fullname.as_str())
+          .unwrap();
       }
     }
     panic!("function not found: {}", name);

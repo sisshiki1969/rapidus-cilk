@@ -10,5 +10,7 @@ function fibo(x) {
     return fibo(x) + fibo(y)
   }
 }
-//main()
-return fibo(10)
+
+let x = fibo(10)
+console.log(x)
+return x

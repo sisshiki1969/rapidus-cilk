@@ -3,6 +3,7 @@ extern crate clap;
 extern crate libc;
 extern crate rustyline;
 use clap::{App, Arg};
+use rapidus::executer;
 
 const VERSION_STR: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -19,6 +20,8 @@ pub fn main() {
       return;
     }
   };
-
-  rapidus::executer::compile_and_run_file(file_name).unwrap();
+  
+  let mut m = executer::compile_file(file_name).unwrap();
+  let ret = executer::execute_jit(&mut m);
+  println!("jit: {:?}", ret);
 }
