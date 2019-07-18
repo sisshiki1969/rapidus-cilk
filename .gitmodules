@@ -1,0 +1,4 @@
+[submodule "cilk"]
+	path = cilk
+	url = https://github.com/maekawatoshiki/cilk.git
+	branch = array
