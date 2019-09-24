@@ -1,24 +1,23 @@
 use crate::node::{BinOp, FormalParameter, Node, NodeBase};
 use crate::parser;
-use cilk::codegen::x64::exec::jit::GenericValue;
+use cilk::codegen::x64::exec::jit::{GenericValue, JITCompiler};
 use cilk::ir::builder::Builder;
 pub use cilk::ir::function::FunctionId;
 pub use cilk::module::Module;
 use cilk::{
-  codegen::x64::{dag, exec, machine},
-  // exec::{interpreter::interp, jit::x64::compiler},
+  codegen::x64::{dag, machine},
   ir::{function, module, types},
 };
 pub use cilk::{
   exec::{
     interpreter::interp::{ConcreteValue, Interpreter},
-    jit::x64::compiler::JITCompiler,
     jit::x64::regalloc::RegisterAllocator,
   },
   ir::{opcode::ICmpKind, value::*},
 };
 
 use std::collections::HashMap;
+use std::time::Instant;
 extern crate clap;
 extern crate libc;
 
@@ -84,7 +83,6 @@ pub fn execute_jit(m: &mut Module) -> Result<GenericValue, String> {
   let mut machine_module = dag::convert_machine::ConvertToMachine::new().convert_module(dag_module);
   machine::phi_elimination::PhiElimination::new().run_on_module(&mut machine_module);
   machine::two_addr::TwoAddressConverter::new().run_on_module(&mut machine_module);
-  // machine::regalloc::PhysicalRegisterAllocator::new().run_on_module(&mut machine_module);
   machine::regalloc::RegisterAllocator::new().run_on_module(&mut machine_module);
 
   /*
@@ -102,15 +100,12 @@ pub fn execute_jit(m: &mut Module) -> Result<GenericValue, String> {
   }
   */
 
-  let mut jit = exec::jit::JITCompiler::new(&machine_module);
+  let mut jit = JITCompiler::new(&machine_module);
   jit.compile_module();
   let func = machine_module.find_function_by_name("main").unwrap();
-  let now = ::std::time::Instant::now();
-  let ret = jit.run(func, vec![exec::jit::GenericValue::Int32(0)]);
-  println!(
-    "duration: {:?}",
-    ::std::time::Instant::now().duration_since(now)
-  );
+  let now = Instant::now();
+  let ret = jit.run(func, vec![GenericValue::Int32(0)]);
+  println!("duration: {:?}", Instant::now().duration_since(now));
   Ok(ret)
 }
 
