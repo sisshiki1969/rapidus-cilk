@@ -1,17 +1,23 @@
 use crate::node::{BinOp, FormalParameter, Node, NodeBase};
 use crate::parser;
-pub use cilk::exec::jit::x64::compiler::GenericValue;
+use cilk::codegen::x64::exec::jit::GenericValue;
 use cilk::ir::builder::Builder;
 pub use cilk::ir::function::FunctionId;
 pub use cilk::module::Module;
+use cilk::{
+  codegen::x64::{dag, exec, machine},
+  // exec::{interpreter::interp, jit::x64::compiler},
+  ir::{function, module, types},
+};
 pub use cilk::{
   exec::{
     interpreter::interp::{ConcreteValue, Interpreter},
     jit::x64::compiler::JITCompiler,
     jit::x64::regalloc::RegisterAllocator,
   },
-  ir::{function, module, opcode::ICmpKind, types, value::*},
+  ir::{opcode::ICmpKind, value::*},
 };
+
 use std::collections::HashMap;
 extern crate clap;
 extern crate libc;
@@ -60,13 +66,51 @@ pub fn compile_file(file_name: impl Into<String>) -> Result<Module, String> {
   Ok(module)
 }
 
-pub fn execute_jit(module: &mut Module) -> Result<GenericValue, String> {
-  let main = module.find_function_by_name("main").unwrap();
-  let mut jit = JITCompiler::new(&module);
+pub fn execute_jit(m: &mut Module) -> Result<GenericValue, String> {
+  let mut dag_module = dag::convert::ConvertToDAG::new(&m).convert_module();
+  dag::combine::Combine::new().combine_module(&mut dag_module);
+  /*
+  for (_, dag_func) in &dag_module.functions {
+    for id in &dag_func.dag_basic_blocks {
+      let bb = &dag_func.dag_basic_block_arena[*id];
+      println!("{}: {:?}", id.index(), bb);
+    }
+    for (id, dag) in &dag_func.dag_arena {
+      println!("{}: {:?}", id.index(), dag);
+    }
+  }
+  */
+
+  let mut machine_module = dag::convert_machine::ConvertToMachine::new().convert_module(dag_module);
+  machine::phi_elimination::PhiElimination::new().run_on_module(&mut machine_module);
+  machine::two_addr::TwoAddressConverter::new().run_on_module(&mut machine_module);
+  // machine::regalloc::PhysicalRegisterAllocator::new().run_on_module(&mut machine_module);
+  machine::regalloc::RegisterAllocator::new().run_on_module(&mut machine_module);
+
+  /*
+  let mut idx = 0;
+  for (_, machine_func) in &machine_module.functions {
+    for bb_id in &machine_func.basic_blocks {
+      let bb = &machine_func.basic_block_arena[*bb_id];
+      println!("Machine basic block: {:?}", bb);
+      for instr in &*bb.iseq_ref() {
+        println!("{}: {:?}", idx, machine_func.instr_arena[*instr]);
+        idx += 1;
+      }
+      println!()
+    }
+  }
+  */
+
+  let mut jit = exec::jit::JITCompiler::new(&machine_module);
   jit.compile_module();
-
-  let ret = jit.run(main, vec![]);
-
+  let func = machine_module.find_function_by_name("main").unwrap();
+  let now = ::std::time::Instant::now();
+  let ret = jit.run(func, vec![exec::jit::GenericValue::Int32(0)]);
+  println!(
+    "duration: {:?}",
+    ::std::time::Instant::now().duration_since(now)
+  );
   Ok(ret)
 }
 
